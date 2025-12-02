@@ -1,40 +1,33 @@
 name: main
-
 on:
   push:
     branches:
       - main
   pull_request:
-    branches:
-      - main
-
+    types: [opened, synchronize, reopened]
+ 
 jobs:
-  sonarcloud:
+  sonarqube:
+    name: SonarQube
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for better analysis
+ 
       - name: Set up JDK 17
         uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Install SonarScanner CLI 8.11
-        run: |
-          wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-8.11.0.23100-linux.zip
-          unzip sonar-scanner-cli-8.11.0.23100-linux.zip
-          echo "$PWD/sonar-scanner-8.11.0.23100-linux/bin" >> $GITHUB_PATH
-
-      - name: Check SonarScanner Version
-        run: sonar-scanner --version
-
-      - name: Run SonarScanner Analysis
-        run: |
-          sonar-scanner \
-          -Dsonar.projectKey=Abhinay3010_sonar-test \
-          -Dsonar.organization=abhinay3010-1 \
-          -Dsonar.sources=. \
-          -Dsonar.host.url=https://sonarcloud.io
+ 
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=Abhinay3010_sonar-test
+            -Dsonar.organization=abhinay3010-1
+            -Dsonar.sources=.
+            -Dsonar.host.url=https://son
