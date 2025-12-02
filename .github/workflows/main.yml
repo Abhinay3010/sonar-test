@@ -1,4 +1,4 @@
-name: main
+name: CI Pipeline with Stages
 
 on:
   push:
@@ -8,51 +8,37 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  build_scan:
+  build_scan_pipeline:
     runs-on: ubuntu-latest
 
     steps:
       # -----------------------------
-      # 1️⃣ Checkout Code
+      # 1️⃣ Checkout Code Stage
       # -----------------------------
-      - name: Checkout code
+      - name: Stage 1: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       # -----------------------------
-      # 2️⃣ Show OS info
+      # 2️⃣ Show Environment Stage
       # -----------------------------
-      - name: Show OS info
-        run: uname -a
-
-      # -----------------------------
-      # 3️⃣ Set up Java
-      # -----------------------------
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      # -----------------------------
-      # 4️⃣ Show Java & Maven version
-      # -----------------------------
-      - name: Show Java & Maven version
+      - name: Stage 2: Show Environment
         run: |
+          uname -a
           java -version
           mvn -version || echo "Maven not installed"
 
       # -----------------------------
-      # 5️⃣ Maven Build
+      # 3️⃣ Maven Build Stage
       # -----------------------------
-      - name: Build with Maven
+      - name: Stage 3: Maven Build
         run: mvn clean install -DskipTests
 
       # -----------------------------
-      # 6️⃣ SonarCloud Scan
+      # 4️⃣ SonarCloud Scan Stage
       # -----------------------------
-      - name: SonarCloud Scan
+      - name: Stage 4: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -64,9 +50,9 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
 
       # -----------------------------
-      # 7️⃣ Install Syft
+      # 5️⃣ Install Syft Stage
       # -----------------------------
-      - name: Install Syft
+      - name: Stage 5: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
           export PATH=$PATH:$(pwd)/bin
@@ -74,17 +60,17 @@ jobs:
           syft version
 
       # -----------------------------
-      # 8️⃣ Generate SBOM
+      # 6️⃣ Generate SBOM Stage
       # -----------------------------
-      - name: Generate SBOM
+      - name: Stage 6: Generate SBOM
         run: |
           export PATH=$PATH:$(pwd)/bin
           syft . -o json > sbom.json
 
       # -----------------------------
-      # 9️⃣ Install Grype
+      # 7️⃣ Install Grype Stage
       # -----------------------------
-      - name: Install Grype
+      - name: Stage 7: Install Grype
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
           export PATH=$PATH:$(pwd)/bin
@@ -92,17 +78,17 @@ jobs:
           grype version
 
       # -----------------------------
-      # 🔟 Scan SBOM for Vulnerabilities
+      # 8️⃣ Grype Vulnerability Scan Stage
       # -----------------------------
-      - name: Scan SBOM with Grype
+      - name: Stage 8: Scan SBOM with Grype
         run: |
           export PATH=$PATH:$(pwd)/bin
           grype sbom:sbom.json
 
       # -----------------------------
-      # 1️⃣1️⃣ Upload SBOM as Artifact
+      # 9️⃣ Upload SBOM Artifact Stage
       # -----------------------------
-      - name: Upload SBOM Artifact
+      - name: Stage 9: Upload SBOM Artifact
         uses: actions/upload-artifact@v4
         with:
           name: sbom
