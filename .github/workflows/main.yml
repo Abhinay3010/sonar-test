@@ -25,5 +25,8 @@ jobs:
         uses: SonarSource/sonarcloud-github-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_ORGANIZATION: abhinay3010-1
-          SONAR_PROJECT_KEY: sonar-test
+        with:
+          args: >
+            -Dsonar.projectKey=sonar-test
+            -Dsonar.organization=abhinay3010-1
+            -Dsonar.sources=.
