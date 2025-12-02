@@ -1,4 +1,4 @@
-name: CI Pipeline with Stages
+name: main
 
 on:
   push:
