@@ -12,17 +12,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # -----------------------------
-      # 1️⃣ Checkout Code Stage
-      # -----------------------------
       - name: Stage 1: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # -----------------------------
-      # 2️⃣ Show Environment Stage
-      # -----------------------------
       - name: Stage 2: Show Environment
         run: |
           echo "OS Info:"
@@ -31,6 +25,7 @@ jobs:
           java -version
           echo "Maven Version:"
           mvn -version || echo "Maven not installed"
+
 
       # -----------------------------
       # 3️⃣ Maven Build Stage
