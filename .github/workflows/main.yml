@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: main
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # needed for Sonar
+          fetch-depth: 0  # needed for SonarCloud
 
       # -----------------------------
       # 2️⃣ Set up Java
@@ -72,16 +72,16 @@ jobs:
           grype version
 
       # -----------------------------
-      # 8️⃣ Scan for Vulnerabilities
+      # 8️⃣ Scan SBOM for Vulnerabilities
       # -----------------------------
       - name: Scan SBOM with Grype
         run: grype sbom:sbom.json
 
       # -----------------------------
-      # 9️⃣ Upload SBOM as Artifact (optional)
+      # 9️⃣ Upload SBOM as Artifact
       # -----------------------------
       - name: Upload SBOM Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: sbom
           path: sbom.json
