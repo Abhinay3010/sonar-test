@@ -8,35 +8,59 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  build_scan_pipeline:
+  # -----------------------------
+  # Stage 1: Checkout
+  # -----------------------------
+  checkout:
     runs-on: ubuntu-latest
-
+    outputs:
+      repo-path: ${{ steps.checkout.outputs.path }}
     steps:
-      - name: Stage 1: Checkout Code
+      - name: Checkout code
+        id: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Stage 2: Show Environment
+  # -----------------------------
+  # Stage 2: Maven Build
+  # -----------------------------
+  maven-build:
+    runs-on: ubuntu-latest
+    needs: checkout
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Show Java & Maven versions
         run: |
-          echo "OS Info:"
-          uname -a
-          echo "Java Version:"
           java -version
-          echo "Maven Version:"
           mvn -version || echo "Maven not installed"
 
-
-      # -----------------------------
-      # 3️⃣ Maven Build Stage
-      # -----------------------------
-      - name: Stage 3: Maven Build
+      - name: Build with Maven
         run: mvn clean install -DskipTests
 
-      # -----------------------------
-      # 4️⃣ SonarCloud Scan Stage
-      # -----------------------------
-      - name: Stage 4: SonarCloud Scan
+  # -----------------------------
+  # Stage 3: SonarCloud Scan
+  # -----------------------------
+  sonar-scan:
+    runs-on: ubuntu-latest
+    needs: maven-build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -47,47 +71,56 @@ jobs:
             -Dsonar.sources=.
             -Dsonar.host.url=https://sonarcloud.io
 
-      # -----------------------------
-      # 5️⃣ Install Syft Stage
-      # -----------------------------
-      - name: Stage 5: Install Syft
+  # -----------------------------
+  # Stage 4: Syft SBOM
+  # -----------------------------
+  syft-sbom:
+    runs-on: ubuntu-latest
+    needs: sonar-scan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
           export PATH=$PATH:$(pwd)/bin
-          echo "Syft Version:"
+          echo "Syft version:"
           syft version
 
-      # -----------------------------
-      # 6️⃣ Generate SBOM Stage
-      # -----------------------------
-      - name: Stage 6: Generate SBOM
+      - name: Generate SBOM
         run: |
           export PATH=$PATH:$(pwd)/bin
           syft . -o json > sbom.json
 
-      # -----------------------------
-      # 7️⃣ Install Grype Stage
-      # -----------------------------
-      - name: Stage 7: Install Grype
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
-          export PATH=$PATH:$(pwd)/bin
-          echo "Grype Version:"
-          grype version
-
-      # -----------------------------
-      # 8️⃣ Grype Vulnerability Scan Stage
-      # -----------------------------
-      - name: Stage 8: Scan SBOM with Grype
-        run: |
-          export PATH=$PATH:$(pwd)/bin
-          grype sbom:sbom.json
-
-      # -----------------------------
-      # 9️⃣ Upload SBOM Artifact Stage
-      # -----------------------------
-      - name: Stage 9: Upload SBOM Artifact
+      - name: Upload SBOM Artifact
         uses: actions/upload-artifact@v4
         with:
           name: sbom
           path: sbom.json
+
+  # -----------------------------
+  # Stage 5: Grype Vulnerability Scan
+  # -----------------------------
+  grype-scan:
+    runs-on: ubuntu-latest
+    needs: syft-sbom
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
+          export PATH=$PATH:$(pwd)/bin
+          echo "Grype version:"
+          grype version
+
+      - name: Scan SBOM with Grype
+        run: |
+          export PATH=$PATH:$(pwd)/bin
+          grype sbom:sbom.json
