@@ -136,16 +136,21 @@ jobs:
     needs: grype-scan
     steps:
       - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+          docker --version
 
       - name: Build Docker Image
-      run: docker build -t myapp:latest .
+        run: docker build -t myapp:latest .
 
       - name: Save Docker Image Tar
-        run: |
-          docker save myapp:latest -o myapp.tar
+        run: docker save myapp:latest -o myapp.tar
 
       - name: Upload Docker Image Artifact
         uses: actions/upload-artifact@v4
@@ -178,5 +183,4 @@ jobs:
         run: docker load -i myapp.tar
 
       - name: Trivy Image Scan
-        run: |
-          trivy image myapp:latest
+        run: trivy image myapp:latest
