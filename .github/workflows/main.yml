@@ -45,7 +45,7 @@ jobs:
       - name: Build with Maven
         run: mvn clean install -DskipTests
 
-      - name: Upload Maven Build Artifact
+      - name: Upload Maven Artifact
         uses: actions/upload-artifact@v4
         with:
           name: maven-artifact
@@ -62,6 +62,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Download Maven Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: maven-artifact
+          path: target/
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
@@ -179,8 +185,7 @@ jobs:
 
       - name: Install Trivy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh
           trivy --version
 
       - name: Load Docker Image
