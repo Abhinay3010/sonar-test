@@ -136,14 +136,12 @@ jobs:
     needs: grype-scan
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
       - name: Build Docker Image
-        run: |
-          docker build -t myapp:latest .
+      run: docker build -t myapp:latest .
 
       - name: Save Docker Image Tar
         run: |
