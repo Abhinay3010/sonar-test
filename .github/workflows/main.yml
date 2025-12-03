@@ -63,12 +63,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download Maven Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: maven-artifact
-          path: target/
-
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
@@ -96,7 +90,6 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
           export PATH=$PATH:$(pwd)/bin
-          echo "Syft version:"
           syft version
 
       - name: Generate SBOM
@@ -132,7 +125,6 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
           export PATH=$PATH:$(pwd)/bin
-          echo "Grype version:"
           grype version
 
       - name: Scan SBOM with Grype
@@ -185,7 +177,7 @@ jobs:
 
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
           trivy --version
 
       - name: Load Docker Image
