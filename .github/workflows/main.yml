@@ -1,4 +1,4 @@
-name: CI Pipeline with Stages
+name: Secure CI/CD Pipeline
 
 on:
   push:
@@ -75,9 +75,9 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
 
   # -----------------------------
-  # Stage 4: Syft SBOM
+  # Stage 4: Syft SBOM (Source Code)
   # -----------------------------
-  syft-sbom:
+  syft-sbom-code:
     runs-on: ubuntu-latest
     needs: sonar-scan
     steps:
@@ -92,52 +92,30 @@ jobs:
           export PATH=$PATH:$(pwd)/bin
           syft version
 
-      - name: Generate SBOM
+      - name: Generate SBOM (All Formats)
         run: |
           export PATH=$PATH:$(pwd)/bin
-          syft . -o json > sbom.json
+          syft . -o json > sbom-syft.json
+          syft . -o cyclonedx-json > sbom-cdx.json
+          syft . -o spdx-json > sbom-spdx.json
+          syft . -o spdx-tag-value > sbom-spdx-tv.spdx
 
-      - name: Upload SBOM Artifact
+      - name: Upload All SBOM Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbom
-          path: sbom.json
+          name: sboms-code
+          path: |
+            sbom-syft.json
+            sbom-cdx.json
+            sbom-spdx.json
+            sbom-spdx-tv.spdx
 
   # -----------------------------
-  # Stage 5: Grype Vulnerability Scan
+  # Stage 5: Docker Build & SBOM
   # -----------------------------
-  grype-scan:
+  docker-build-sbom:
     runs-on: ubuntu-latest
-    needs: syft-sbom
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download SBOM Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: sbom
-          path: .
-
-      - name: Install Grype
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
-          export PATH=$PATH:$(pwd)/bin
-          grype version
-
-      - name: Scan SBOM with Grype
-        run: |
-          export PATH=$PATH:$(pwd)/bin
-          grype sbom:sbom.json
-
-  # -----------------------------
-  # Stage 6: Docker Build
-  # -----------------------------
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: grype-scan
+    needs: syft-sbom-code
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -153,27 +131,79 @@ jobs:
       - name: Build Docker Image
         run: docker build -t myapp:latest .
 
+      - name: Generate SBOM for Docker Image
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
+          export PATH=$PATH:$(pwd)/bin
+          syft docker:myapp:latest -o json > sbom-image.json
+          syft docker:myapp:latest -o cyclonedx-json > sbom-image-cdx.json
+          syft docker:myapp:latest -o spdx-json > sbom-image-spdx.json
+          syft docker:myapp:latest -o spdx-tag-value > sbom-image-spdx-tv.spdx
+
       - name: Save Docker Image Tar
         run: docker save myapp:latest -o myapp.tar
 
-      - name: Upload Docker Image Artifact
+      - name: Upload Docker Image and SBOM Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: docker-image
-          path: myapp.tar
+          name: docker-artifacts
+          path: |
+            myapp.tar
+            sbom-image.json
+            sbom-image-cdx.json
+            sbom-image-spdx.json
+            sbom-image-spdx-tv.spdx
 
   # -----------------------------
-  # Stage 7: Trivy Scan
+  # Stage 6: Grype Vulnerability Scan (All SBOMs)
+  # -----------------------------
+  grype-scan:
+    runs-on: ubuntu-latest
+    needs: docker-build-sbom
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download All SBOM Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sboms-code
+          path: ./sboms-code
+
+      - name: Download Docker SBOM Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-artifacts
+          path: ./docker-artifacts
+
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
+          export PATH=$PATH:$(pwd)/bin
+          grype version
+
+      - name: Scan All SBOMs with Grype
+        run: |
+          export PATH=$PATH:$(pwd)/bin
+          for sbom in ./sboms-code/*.json ./sboms-code/*.spdx ./docker-artifacts/*.json ./docker-artifacts/*.spdx; do
+            echo "Scanning $sbom ..."
+            grype sbom:$sbom
+          done
+
+  # -----------------------------
+  # Stage 7: Trivy Docker Image Scan
   # -----------------------------
   trivy-scan:
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: grype-scan
     steps:
       - name: Download Docker Image Artifact
         uses: actions/download-artifact@v4
         with:
-          name: docker-image
-          path: .
+          name: docker-artifacts
+          path: ./docker-artifacts
 
       - name: Install Trivy
         run: |
@@ -181,7 +211,19 @@ jobs:
           trivy --version
 
       - name: Load Docker Image
-        run: docker load -i myapp.tar
+        run: docker load -i ./docker-artifacts/myapp.tar
 
       - name: Trivy Image Scan
         run: trivy image myapp:latest
+
+  # -----------------------------
+  # Stage 8: Optional: Fail on Vulnerabilities (High/Critical)
+  # -----------------------------
+  fail-on-vulns:
+    runs-on: ubuntu-latest
+    needs: trivy-scan
+    steps:
+      - name: Fail if High/Critical Vulnerabilities Found
+        run: |
+          docker load -i ./docker-artifacts/myapp.tar
+          trivy image --exit-code 1 --severity HIGH,CRITICAL myapp:latest || echo "High/Critical vulns found"
