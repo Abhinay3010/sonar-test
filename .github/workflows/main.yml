@@ -14,8 +14,7 @@ jobs:
   checkout:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -26,19 +25,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: checkout
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: 17
 
       - name: Build with Maven
-        run: mvn clean install -DskipTests
+        run: mvn clean package -DskipTests
 
       - name: Upload Maven Artifact
         uses: actions/upload-artifact@v4
@@ -53,8 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: maven-build
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
@@ -74,18 +71,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: sonar-scan
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
-          export PATH=$PATH:$(pwd)/bin
-          syft version
+          echo "$(pwd)/bin" >> $GITHUB_PATH
 
-      - name: Generate SBOM (All Formats)
+      - name: Generate SBOMs (Source Code)
         run: |
-          export PATH=$PATH:$(pwd)/bin
           syft . -o json > sbom-syft.json
           syft . -o cyclonedx-json > sbom-cdx.json
           syft . -o spdx-json > sbom-spdx.json
@@ -102,14 +96,13 @@ jobs:
             sbom-spdx-tv.spdx
 
   # -----------------------------
-  # Stage 5: Docker Build & SBOM
+  # Stage 5: Docker Build & Image SBOM
   # -----------------------------
   docker-build-sbom:
     runs-on: ubuntu-latest
     needs: syft-sbom-code
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download Maven Artifact
         uses: actions/download-artifact@v4
@@ -120,19 +113,22 @@ jobs:
       - name: Build Docker Image
         run: docker build -t myapp:latest .
 
-      - name: Generate SBOM for Docker Image
+      - name: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh
-          export PATH=$PATH:$(pwd)/bin
+          echo "$(pwd)/bin" >> $GITHUB_PATH
+
+      - name: Generate Docker Image SBOMs
+        run: |
           syft docker:myapp:latest -o json > sbom-image.json
           syft docker:myapp:latest -o cyclonedx-json > sbom-image-cdx.json
           syft docker:myapp:latest -o spdx-json > sbom-image-spdx.json
           syft docker:myapp:latest -o spdx-tag-value > sbom-image-spdx-tv.spdx
 
-      - name: Save Docker Image Tar
+      - name: Save Docker Image
         run: docker save myapp:latest -o myapp.tar
 
-      - name: Upload Docker Image and SBOM Artifacts
+      - name: Upload Docker Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: docker-artifacts
@@ -144,43 +140,38 @@ jobs:
             sbom-image-spdx-tv.spdx
 
   # -----------------------------
-  # Stage 6: Grype Vulnerability Scan
+  # Stage 6: Grype Scan (SBOM-based)
   # -----------------------------
   grype-scan:
     runs-on: ubuntu-latest
     needs: docker-build-sbom
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download SBOM Artifacts
+      - name: Download SBOM Code
         uses: actions/download-artifact@v4
         with:
           name: sboms-code
-          path: ./sboms-code
+          path: sboms-code
 
       - name: Download Docker Artifacts
         uses: actions/download-artifact@v4
         with:
           name: docker-artifacts
-          path: ./docker-artifacts
+          path: docker-artifacts
 
       - name: Install Grype
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
-          export PATH=$PATH:$(pwd)/bin
-          grype version
+          echo "$(pwd)/bin" >> $GITHUB_PATH
 
-      - name: Scan All SBOMs with Grype
+      - name: Grype Scan All SBOMs
         run: |
-          export PATH=$PATH:$(pwd)/bin
-          for sbom in ./sboms-code/*.json ./sboms-code/*.spdx ./docker-artifacts/*.json ./docker-artifacts/*.spdx; do
-            echo "Scanning $sbom ..."
-            grype sbom:$sbom
+          for sbom in sboms-code/*.json docker-artifacts/*.json; do
+            echo "Scanning $sbom"
+            grype sbom:$sbom || true
           done
 
   # -----------------------------
-  # Stage 7: Trivy Docker Image Scan
+  # Stage 7: Trivy Image Scan
   # -----------------------------
   trivy-scan:
     runs-on: ubuntu-latest
@@ -195,33 +186,19 @@ jobs:
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
-          trivy --version
 
       - name: Load Docker Image
-        run: docker load -i ./myapp.tar
+        run: docker load -i myapp.tar
 
-      - name: Trivy Image Scan
-        run: trivy image myapp:latest
+      - name: Trivy Scan (Report Only)
+        run: trivy image myapp:latest || true
 
   # -----------------------------
-  # Stage 8: Fail on High/Critical Vulnerabilities
+  # Stage 8: Fail on High/Critical
   # -----------------------------
   fail-on-vulns:
     runs-on: ubuntu-latest
     needs: trivy-scan
-    steps:
-      - name: Load Docker Image
-        run: docker load -i ./myapp.tar
-
-      - name: Fail if High/Critical Vulnerabilities
-        run: trivy image --exit-code 1 --severity HIGH,CRITICAL myapp:latest || echo "High/Critical vulnerabilities found"
-
-  # -----------------------------
-  # Stage 9: Slack & Email Alerts
-  # -----------------------------
-  vuln-alerts:
-    runs-on: ubuntu-latest
-    needs: fail-on-vulns
     steps:
       - name: Download Docker Artifacts
         uses: actions/download-artifact@v4
@@ -229,42 +206,61 @@ jobs:
           name: docker-artifacts
           path: .
 
+      - name: Load Docker Image
+        run: docker load -i myapp.tar
+
+      - name: Enforce Vulnerability Policy
+        run: trivy image --exit-code 1 --severity HIGH,CRITICAL myapp:latest
+
+  # -----------------------------
+  # Stage 9: Slack & Email Alerts
+  # -----------------------------
+  vuln-alerts:
+    runs-on: ubuntu-latest
+    needs: fail-on-vulns
+    if: always()
+    steps:
+      - name: Download SBOM Code
+        uses: actions/download-artifact@v4
+        with:
+          name: sboms-code
+          path: sboms-code
+
+      - name: Download Docker Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-artifacts
+          path: docker-artifacts
+
       - name: Install Grype
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
-          export PATH=$PATH:$(pwd)/bin
+          echo "$(pwd)/bin" >> $GITHUB_PATH
 
-      - name: Scan for Vulnerabilities and Capture Report
-        id: grype-report
+      - name: Generate Grype Report
         run: |
-          export PATH=$PATH:$(pwd)/bin
-          grype sbom:./sboms-code/*.json ./docker-artifacts/*.json --fail-on 0 > grype-report.txt || true
-          echo "::set-output name=report::$(head -n 50 grype-report.txt)"
+          grype sbom:sboms-code/*.json sbom:docker-artifacts/*.json > grype-report.txt || true
 
       - name: Slack Notification
-        if: always()
         uses: slackapi/slack-github-action@v2
         with:
-          channel-id: 'YOUR_SLACK_CHANNEL_ID'
+          channel-id: YOUR_SLACK_CHANNEL_ID
           slack-message: |
-            Vulnerability Scan Completed for ${{ github.repository }}.
-            Top 50 lines of report:
-            ${{ steps.grype-report.outputs.report }}
+            Security scan completed for ${{ github.repository }}.
+            Check GitHub Actions artifacts for full report.
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
 
       - name: Email Notification
-        if: always()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 465
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "Vulnerability Scan Report for ${{ github.repository }}"
+          subject: "Security Scan Report - ${{ github.repository }}"
           body: |
-            Vulnerability Scan Completed for ${{ github.repository }}.
-            Top 50 lines of report:
-            ${{ steps.grype-report.outputs.report }}
+            Security scan completed.
+            Please check GitHub Actions artifacts for detailed reports.
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: ${{ secrets.EMAIL_USERNAME }}
           secure: true
