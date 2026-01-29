@@ -183,7 +183,7 @@ jobs:
         run: trivy image myapp:latest || true
 
   # -----------------------------
-  # Stage 8: Enforce Policy (FIXED)
+  # Stage 8: Enforce Policy
   # -----------------------------
   fail-on-vulns:
     runs-on: ubuntu-latest
@@ -208,7 +208,7 @@ jobs:
         run: trivy image --exit-code 1 --severity HIGH,CRITICAL myapp:latest
 
   # -----------------------------
-  # Stage 9: Alerts
+  # Stage 9: Slack & Email Alerts
   # -----------------------------
   vuln-alerts:
     runs-on: ubuntu-latest
@@ -221,11 +221,39 @@ jobs:
           name: docker-artifacts
           path: docker-artifacts
 
+      - name: Download SBOM Code
+        uses: actions/download-artifact@v4
+        with:
+          name: sboms-code
+          path: sboms-code
+
+      - name: Install Grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
+          echo "$(pwd)/bin" >> $GITHUB_PATH
+
+      - name: Generate Grype Report
+        run: |
+          grype sbom:sboms-code/*.json sbom:docker-artifacts/*.json > grype-report.txt || true
+
       - name: Slack Notification
         uses: slackapi/slack-github-action@v2
         with:
-          channel-id: YOUR_SLACK_CHANNEL_ID
-          slack-message: |
-            Security pipeline completed for ${{ github.repository }}.
-            Check GitHub Actions for details.
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": ":shield: Secure CI/CD Pipeline Completed\nRepository: ${{ github.repository }}\nBranch: ${{ github.ref_name }}\nStatus: ${{ job.status }}"
+            }
+
+      - name: Email Notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Security Scan Report - ${{ github.repository }}"
+          body: "Security scan completed. Please check GitHub Actions artifacts for detailed reports."
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+          secure: true
